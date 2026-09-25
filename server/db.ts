@@ -2,6 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
+  inventoryAlerts,
   products,
   reviews,
   sales,
@@ -77,6 +78,37 @@ export async function getShopSnapshot() {
   return { shop: shop[0], inventory, team, reviews: recentReviews, sales: recentSales };
 }
 
+export async function getInventoryAlerts(shopId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(inventoryAlerts)
+    .where(eq(inventoryAlerts.shopId, shopId))
+    .orderBy(desc(inventoryAlerts.createdAt))
+    .limit(20);
+}
+
+export async function markInventoryAlertRead(alertId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(inventoryAlerts).set({ readAt: new Date() }).where(eq(inventoryAlerts.id, alertId));
+  return { success: true };
+}
+
+export function buildLowStockAlert(input: {
+  productName: string;
+  unit: string;
+  previousStock: number;
+  nextStock: number;
+  reorderLevel: number;
+}) {
+  const crossedLowStockThreshold = input.previousStock > input.reorderLevel && input.nextStock <= input.reorderLevel;
+  if (!crossedLowStockThreshold) return null;
+  return {
+    title: `${input.productName} is low on stock`,
+    message: `${input.productName} has ${Math.max(0, input.nextStock)} ${input.unit} remaining. Reorder threshold: ${input.reorderLevel}.`,
+  };
+}
+
 export async function createSale(input: {
   shopId: number;
   productId: number;
@@ -88,6 +120,11 @@ export async function createSale(input: {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
+    const productRows = await tx.select().from(products).where(eq(products.id, input.productId)).limit(1);
+    const product = productRows[0];
+    if (!product) throw new Error("Product not found");
+
+    const nextStock = product.stockOnHand - input.quantity;
     await tx.insert(sales).values(input);
     await tx.update(products)
       .set({ stockOnHand: sql`${products.stockOnHand} - ${input.quantity}` })
@@ -100,7 +137,27 @@ export async function createSale(input: {
         })
         .where(eq(teamMembers.id, input.employeeId));
     }
-    return { success: true };
+
+    const lowStockAlert = buildLowStockAlert({
+      productName: product.name,
+      unit: product.unit,
+      previousStock: product.stockOnHand,
+      nextStock,
+      reorderLevel: product.reorderLevel,
+    });
+    if (!lowStockAlert) return { success: true, lowStockAlert: null };
+
+    const [alert] = await tx.insert(inventoryAlerts).values({
+      shopId: input.shopId,
+      productId: product.id,
+      title: lowStockAlert.title,
+      message: lowStockAlert.message,
+    }).$returningId();
+
+    return {
+      success: true,
+      lowStockAlert: { id: alert.id, ...lowStockAlert, productName: product.name, stockOnHand: Math.max(0, nextStock), reorderLevel: product.reorderLevel },
+    };
   });
 }
 

@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { createSale, getShopSnapshot, markReview, setShopBeacon } from "./db";
+import { createSale, getInventoryAlerts, getShopSnapshot, markInventoryAlertRead, markReview, setShopBeacon } from "./db";
 import { TRPCError } from "@trpc/server";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -25,6 +26,12 @@ export const appRouter = router({
   }),
   operations: router({
     snapshot: publicProcedure.query(() => getShopSnapshot()),
+    alerts: adminProcedure
+      .input(z.object({ shopId: z.number().int().positive() }))
+      .query(({ input }) => getInventoryAlerts(input.shopId)),
+    markAlertRead: adminProcedure
+      .input(z.object({ alertId: z.number().int().positive() }))
+      .mutation(({ input }) => markInventoryAlertRead(input.alertId)),
     logSale: protectedProcedure
       .input(z.object({
         shopId: z.number().int().positive(),
@@ -34,7 +41,22 @@ export const appRouter = router({
         revenueCents: z.number().int().nonnegative(),
         profitCents: z.number().int(),
       }))
-      .mutation(({ input }) => createSale(input)),
+      .mutation(async ({ input }) => {
+        const result = await createSale(input);
+        if (result?.lowStockAlert) {
+          let ownerNotificationSent = false;
+          try {
+            ownerNotificationSent = await notifyOwner({
+              title: result.lowStockAlert.title,
+              content: `${result.lowStockAlert.message} Open Stockwise Ops to review and reorder.`,
+            });
+          } catch (error) {
+            console.warn("[LowStock] Owner notification unavailable; in-app alert was saved.", error);
+          }
+          return { ...result, ownerNotificationSent };
+        }
+        return result;
+      }),
     setBeacon: adminProcedure
       .input(z.object({
         shopId: z.number().int().positive(),

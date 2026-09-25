@@ -85,6 +85,17 @@ export const reviews = mysqlTable("reviews", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const inventoryAlerts = mysqlTable("inventoryAlerts", {
+  id: int("id").autoincrement().primaryKey(),
+  shopId: int("shopId").notNull(),
+  productId: int("productId").notNull(),
+  type: mysqlEnum("type", ["low_stock"]).default("low_stock").notNull(),
+  title: varchar("title", { length: 180 }).notNull(),
+  message: text("message").notNull(),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Shop = typeof shops.$inferSelect;
@@ -92,3 +103,4 @@ export type TeamMember = typeof teamMembers.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
+export type InventoryAlert = typeof inventoryAlerts.$inferSelect;

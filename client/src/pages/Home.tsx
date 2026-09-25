@@ -27,7 +27,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const heroImage = "/manus-storage/stockwise-team_39c7ef70.jpg";
 
@@ -94,14 +94,39 @@ export default function Home() {
   const [saleProduct, setSaleProduct] = useState(initialProducts[0].name);
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState("This year");
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const snapshot = trpc.operations.snapshot.useQuery(undefined, { retry: false, staleTime: 60_000 });
+  const alertsInput = useMemo(() => ({ shopId: 1 }), []);
+  const alertsQuery = trpc.operations.alerts.useQuery(alertsInput, {
+    enabled: isAuthenticated && role === "owner",
+    refetchInterval: isAuthenticated && role === "owner" ? 15_000 : false,
+    retry: false,
+  });
   const logSale = trpc.operations.logSale.useMutation();
   const setBeacon = trpc.operations.setBeacon.useMutation();
   const markReview = trpc.operations.markReview.useMutation();
+  const markAlertRead = trpc.operations.markAlertRead.useMutation({
+    onSuccess: () => alertsQuery.refetch(),
+  });
+  const utils = trpc.useUtils();
+  const seenAlertIds = useRef(new Set<number>());
+  const alertsBootstrapped = useRef(false);
 
   const visibleProducts = useMemo(() => products.filter((product) => `${product.name} ${product.sku} ${product.category}`.toLowerCase().includes(search.toLowerCase())), [products, search]);
   const totalSold = team.reduce((sum, member) => sum + member.sold, 0);
   const employeeOfMonth = [...team].sort((a, b) => b.sold - a.sold)[0];
+  const alerts = alertsQuery.data ?? [];
+  const unreadAlerts = alerts.filter((alert) => !alert.readAt);
+
+  useEffect(() => {
+    if (!alertsQuery.data) return;
+    const freshAlerts = alertsQuery.data.filter((alert) => !seenAlertIds.current.has(alert.id));
+    if (alertsBootstrapped.current) {
+      freshAlerts.forEach((alert) => toast.error(alert.title, { description: alert.message }));
+    }
+    freshAlerts.forEach((alert) => seenAlertIds.current.add(alert.id));
+    alertsBootstrapped.current = true;
+  }, [alertsQuery.data]);
 
   function toggleBeacon() {
     const next = !beaconOn;
@@ -123,7 +148,16 @@ export default function Home() {
     const nextProducts = products.map((item) => item.name === product.name ? { ...item, stock: Math.max(0, item.stock - saleQty), trend: "+21%" } : item);
     setProducts(nextProducts);
     setTeam(team.map((member, index) => index === 0 ? { ...member, sold: member.sold + saleQty } : member));
-    if (isAuthenticated) logSale.mutate({ shopId: 1, productId: product.id, employeeId: 1, quantity: saleQty, revenueCents: Math.round(product.price * saleQty * 100), profitCents: Math.round(product.price * saleQty * 36) });
+    if (isAuthenticated) {
+      logSale.mutate({ shopId: 1, productId: product.id, employeeId: 1, quantity: saleQty, revenueCents: Math.round(product.price * saleQty * 100), profitCents: Math.round(product.price * saleQty * 36) }, {
+        onSuccess: (result) => {
+          utils.operations.alerts.invalidate(alertsInput);
+          if (result?.lowStockAlert) {
+            toast.error(result.lowStockAlert.title, { description: result.lowStockAlert.message });
+          }
+        },
+      });
+    }
     toast.success(`${saleQty} ${product.unit} of ${product.name} logged`, { description: "Inventory and team score updated." });
     setSaleQty(1);
   }
@@ -153,7 +187,8 @@ export default function Home() {
         {mobileOpen && <button aria-label="Close menu" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-40 bg-[#1e2a28]/20 backdrop-blur-sm lg:hidden" />}
 
         <main className="min-w-0 flex-1 px-4 py-4 sm:px-7 sm:py-7 lg:px-10">
-          <header className="flex items-center justify-between gap-4"><div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="rounded-xl border border-[#ebe6db] bg-white/70 p-2.5 text-[#67736b] lg:hidden"><Menu className="h-5 w-5" /></button><div><p className="text-xs font-semibold text-[#9da39b]">Tuesday, 22 September 2026</p><h1 className="mt-0.5 font-display text-[27px] font-semibold tracking-[-.045em] sm:text-[32px]">Good morning, {welcomeName} <span className="text-[#ef8354]">.</span></h1></div></div><div className="flex items-center gap-2 sm:gap-3"><button className="hidden items-center gap-2 rounded-xl border border-[#e8e2d7] bg-white/70 px-3 py-2 text-xs font-semibold text-[#6f7971] sm:flex"><MapPin className="h-3.5 w-3.5 text-[#ef8354]" /> Portland, OR <ChevronDown className="h-3.5 w-3.5" /></button><button className="relative rounded-xl border border-[#e8e2d7] bg-white/70 p-2.5 text-[#78817a] hover:bg-white"><Bell className="h-4 w-4" /><span className="absolute right-2 top-1.5 h-1.5 w-1.5 rounded-full bg-[#ef8354]" /></button><div className="hidden h-9 w-9 items-center justify-center rounded-full bg-[#ef8354] text-xs font-bold text-white sm:flex">{welcomeName.slice(0, 1)}</div></div></header>
+          <header className="flex items-center justify-between gap-4"><div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="rounded-xl border border-[#ebe6db] bg-white/70 p-2.5 text-[#67736b] lg:hidden"><Menu className="h-5 w-5" /></button><div><p className="text-xs font-semibold text-[#9da39b]">Tuesday, 22 September 2026</p><h1 className="mt-0.5 font-display text-[27px] font-semibold tracking-[-.045em] sm:text-[32px]">Good morning, {welcomeName} <span className="text-[#ef8354]">.</span></h1></div></div><div className="flex items-center gap-2 sm:gap-3"><button className="hidden items-center gap-2 rounded-xl border border-[#e8e2d7] bg-white/70 px-3 py-2 text-xs font-semibold text-[#6f7971] sm:flex"><MapPin className="h-3.5 w-3.5 text-[#ef8354]" /> Portland, OR <ChevronDown className="h-3.5 w-3.5" /></button><button onClick={() => setNotificationsOpen((open) => !open)} aria-label="Open low-stock notifications" className="relative rounded-xl border border-[#e8e2d7] bg-white/70 p-2.5 text-[#78817a] hover:bg-white"><Bell className="h-4 w-4" />{unreadAlerts.length > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ef8354] px-1 text-[9px] font-bold text-white">{unreadAlerts.length > 9 ? "9+" : unreadAlerts.length}</span>}</button><div className="hidden h-9 w-9 items-center justify-center rounded-full bg-[#ef8354] text-xs font-bold text-white sm:flex">{welcomeName.slice(0, 1)}</div></div></header>
+          {notificationsOpen && <div className="relative z-30"><div className="absolute right-0 top-3 w-full max-w-[360px] overflow-hidden rounded-2xl border border-[#ebe6db] bg-[#fffdf8] shadow-2xl shadow-[#1e2a28]/10"><div className="flex items-center justify-between border-b border-[#eee9df] px-4 py-3"><div><p className="text-xs font-bold">Owner alerts</p><p className="mt-0.5 text-[10px] text-[#9ca29b]">Low-stock warnings refresh automatically</p></div><span className="rounded-full bg-[#fff0e6] px-2 py-1 text-[10px] font-bold text-[#bf6235]">{unreadAlerts.length} unread</span></div>{alerts.length === 0 ? <div className="px-4 py-6 text-center"><CheckCircle2 className="mx-auto h-6 w-6 text-[#6f9888]" /><p className="mt-2 text-xs font-bold">No inventory alerts</p><p className="mt-1 text-[10px] text-[#9ca29b]">You’ll be notified here when an item crosses its reorder point.</p></div> : <div className="max-h-[280px] overflow-y-auto">{alerts.map((alert) => <button key={alert.id} onClick={() => { if (!alert.readAt) markAlertRead.mutate({ alertId: alert.id }); }} className={`flex w-full gap-3 border-b border-[#f0ece4] px-4 py-3 text-left transition-colors hover:bg-[#faf7f0] ${alert.readAt ? "opacity-60" : ""}`}><div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#fff0e6] text-[#bf6235]"><PackageSearch className="h-3.5 w-3.5" /></div><div className="min-w-0 flex-1"><p className="text-[11px] font-bold text-[#39463f]">{alert.title}</p><p className="mt-1 text-[10px] leading-4 text-[#7f887f]">{alert.message}</p><p className="mt-1 text-[9px] text-[#a6aba4]">{new Date(alert.createdAt).toLocaleString()}</p></div>{!alert.readAt && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#ef8354]" />}</button>)}</div>}</div></div>}
 
           <div className="mt-7 flex flex-col gap-4 rounded-[24px] bg-[#1e2a28] p-5 text-[#fffdf8] shadow-[0_20px_60px_rgba(30,42,40,.18)] sm:p-7 lg:flex-row lg:items-center lg:justify-between" style={{ backgroundImage: `linear-gradient(90deg, rgba(30,42,40,.98) 0%, rgba(30,42,40,.9) 35%, rgba(30,42,40,.36) 74%, rgba(30,42,40,.12) 100%), url(${heroImage})`, backgroundPosition: "center", backgroundSize: "cover" }}><div className="max-w-[560px]"><div className="flex items-center gap-2 text-[#ffbf9f]"><Sparkles className="h-4 w-4" /><span className="text-[11px] font-bold uppercase tracking-[.18em]">Today at Cedar & Co.</span></div><h2 className="mt-3 font-display text-[26px] font-semibold leading-[1.05] tracking-[-.04em] sm:text-[33px]">Your shop is moving<br className="hidden sm:block" /> in the right direction.</h2><p className="mt-3 max-w-[430px] text-sm leading-6 text-white/65">Keep the floor stocked, celebrate the people making it happen, and let your customers feel close to the work.</p><div className="mt-5 flex flex-wrap gap-2"><button onClick={() => setView(role === "owner" ? "inventory" : "overview")} className="inline-flex items-center gap-2 rounded-xl bg-[#ef8354] px-4 py-2.5 text-xs font-bold text-white transition-transform hover:-translate-y-0.5 active:scale-[.98]">{role === "owner" ? "Review stock" : "Log a sale"}<ArrowUpRight className="h-3.5 w-3.5" /></button><button onClick={toggleBeacon} className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-xs font-bold text-white/85 backdrop-blur transition-colors hover:bg-white/15"><span className={`h-1.5 w-1.5 rounded-full ${beaconOn ? "bg-[#90d2ae]" : "bg-white/40"}`} /> {beaconOn ? "Nearby signal live" : "Turn on nearby signal"}</button></div></div><div className="hidden min-w-[210px] rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-md lg:block"><p className="text-[10px] font-bold uppercase tracking-[.16em] text-white/45">Store beacon</p><div className="mt-3 flex items-center justify-between"><div><p className="font-display text-3xl">{beaconOn ? "Live" : "Off"}</p><p className="mt-1 text-[11px] text-white/55">{geoLabel}</p></div><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${beaconOn ? "bg-[#e9f6ed] text-[#4f8a67]" : "bg-white/10 text-white/40"}`}><MapPin className="h-5 w-5" /></div></div></div></div>
 
