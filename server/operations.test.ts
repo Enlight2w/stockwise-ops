@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import { buildLowStockAlert } from "./db";
+import { getMarketAnalysis } from "./market";
 import type { TrpcContext } from "./_core/context";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
@@ -53,6 +54,24 @@ describe("operations router", () => {
     };
     const caller = appRouter.createCaller(createContext(user));
     await expect(caller.operations.alerts({ shopId: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("requires authentication for owner workspace data", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.operations.workspace()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("parses live market prices and preserves the source label", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => '<a class="result__a">Granola retailer</a><a class="result__snippet">Available for $12.50 per pack</a><a class="result__a">Market listing</a><a class="result__snippet">Typical price US$18.00 today</a>',
+    }));
+    const result = await getMarketAnalysis({ productName: "Harvest Granola", category: "Pantry", countryCode: "US", currencyCode: "USD" });
+    expect(result.sourceType).toBe("live_web_snapshot");
+    expect(result.low).toBe(12.5);
+    expect(result.high).toBe(18);
+    expect(result.sources[0]?.title).toBe("Granola retailer");
+    vi.unstubAllGlobals();
   });
 
   it("rejects invalid sale quantities", async () => {

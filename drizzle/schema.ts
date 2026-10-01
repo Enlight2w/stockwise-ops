@@ -30,6 +30,12 @@ export const shops = mysqlTable("shops", {
   latitude: varchar("latitude", { length: 32 }),
   longitude: varchar("longitude", { length: 32 }),
   beaconEnabled: boolean("beaconEnabled").default(false).notNull(),
+  subscriptionPlan: mysqlEnum("subscriptionPlan", ["starter", "growth", "scale"]).default("starter").notNull(),
+  subscriptionStatus: mysqlEnum("subscriptionStatus", ["trialing", "active", "past_due"]).default("trialing").notNull(),
+  countryCode: varchar("countryCode", { length: 8 }).default("US").notNull(),
+  currencyCode: varchar("currencyCode", { length: 8 }).default("USD").notNull(),
+  languageCode: varchar("languageCode", { length: 12 }).default("en").notNull(),
+  setupCompleted: boolean("setupCompleted").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

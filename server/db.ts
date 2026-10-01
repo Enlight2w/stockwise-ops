@@ -64,6 +64,56 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getOwnerWorkspace(ownerUserId: number, ownerName: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  let shop = (await db.select().from(shops).where(eq(shops.ownerUserId, ownerUserId)).limit(1))[0];
+  if (!shop) {
+    const [created] = await db.insert(shops).values({
+      ownerUserId,
+      name: `${ownerName}'s shop`,
+      businessType: "retail",
+      subscriptionPlan: "starter",
+      subscriptionStatus: "trialing",
+      countryCode: "US",
+      currencyCode: "USD",
+      languageCode: "en",
+      setupCompleted: false,
+    }).$returningId();
+    shop = (await db.select().from(shops).where(eq(shops.id, created.id)).limit(1))[0];
+  }
+  if (!shop) return null;
+
+  const ownerMember = (await db.select().from(teamMembers).where(and(eq(teamMembers.shopId, shop.id), eq(teamMembers.role, "owner"))).limit(1))[0];
+  if (!ownerMember) {
+    await db.insert(teamMembers).values({ shopId: shop.id, userId: ownerUserId, name: ownerName, role: "owner", avatarColor: "#ef8354" });
+  }
+
+  const [inventory, team, recentReviews, recentSales, alerts] = await Promise.all([
+    db.select().from(products).where(eq(products.shopId, shop.id)).orderBy(desc(products.updatedAt)),
+    db.select().from(teamMembers).where(and(eq(teamMembers.shopId, shop.id), eq(teamMembers.active, true))).orderBy(desc(teamMembers.monthlyUnits)),
+    db.select().from(reviews).where(eq(reviews.shopId, shop.id)).orderBy(desc(reviews.createdAt)).limit(12),
+    db.select().from(sales).where(eq(sales.shopId, shop.id)).orderBy(desc(sales.soldAt)).limit(40),
+    getInventoryAlerts(shop.id),
+  ]);
+  return { shop, inventory, team, reviews: recentReviews, sales: recentSales, alerts };
+}
+
+export async function updateShopProfile(ownerUserId: number, input: {
+  name: string;
+  businessType: "retail" | "wholesale" | "hybrid";
+  countryCode: string;
+  currencyCode: string;
+  languageCode: string;
+  subscriptionPlan: "starter" | "growth" | "scale";
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(shops).set({ ...input, setupCompleted: true }).where(eq(shops.ownerUserId, ownerUserId));
+  return { success: true };
+}
+
 export async function getShopSnapshot() {
   const db = await getDb();
   if (!db) return null;

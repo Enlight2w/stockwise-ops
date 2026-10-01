@@ -22,6 +22,13 @@
       "when": 1790377570086,
       "tag": "0002_silent_edwin_jarvis",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1790377875354,
+      "tag": "0003_shallow_tempest",
+      "breakpoints": true
     }
   ]
 }
