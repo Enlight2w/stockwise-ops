@@ -20,6 +20,11 @@ describe("operations router", () => {
     expect(result === null || typeof result === "object").toBe(true);
   });
 
+  it("allows unauthenticated customers to read the public shop directory", async () => {
+    const result = await appRouter.createCaller(createContext()).operations.publicDirectory();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
   it("requires an authenticated user to log a sale", async () => {
     const caller = appRouter.createCaller(createContext());
     await expect(caller.operations.logSale({
