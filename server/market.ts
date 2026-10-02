@@ -61,3 +61,11 @@ export async function getMarketAnalysis(input: { productName: string; category?:
     checkedAt: new Date().toISOString(),
   };
 }
+
+export async function getMarketAnalysisBatch(input: { items: Array<{ productName: string; category?: string }>; countryCode: string; currencyCode: string }) {
+  const results = await Promise.all(input.items.slice(0, 8).map(async item => ({
+    productName: item.productName,
+    analysis: await getMarketAnalysis({ ...item, countryCode: input.countryCode, currencyCode: input.currencyCode }),
+  })));
+  return results;
+}

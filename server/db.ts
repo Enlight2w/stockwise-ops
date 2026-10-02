@@ -1,5 +1,6 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { nanoid } from "nanoid";
 import {
   InsertUser,
   inventoryAlerts,
@@ -7,6 +8,7 @@ import {
   reviews,
   sales,
   shops,
+  teamInvites,
   teamMembers,
   users,
 } from "../drizzle/schema";
@@ -111,6 +113,102 @@ export async function updateShopProfile(ownerUserId: number, input: {
   const db = await getDb();
   if (!db) return null;
   await db.update(shops).set({ ...input, setupCompleted: true }).where(eq(shops.ownerUserId, ownerUserId));
+  return { success: true };
+}
+
+export async function getShopByOwnerId(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(shops).where(eq(shops.ownerUserId, ownerUserId)).limit(1))[0];
+}
+
+export async function getTeamMemberForUser(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(teamMembers).where(and(eq(teamMembers.userId, userId), eq(teamMembers.active, true))).limit(1))[0];
+}
+
+export async function getStaffForOwner(ownerUserId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const shop = await getShopByOwnerId(ownerUserId);
+  if (!shop) return null;
+  const [members, invites] = await Promise.all([
+    db.select().from(teamMembers).where(eq(teamMembers.shopId, shop.id)).orderBy(desc(teamMembers.monthlyUnits)),
+    db.select().from(teamInvites).where(eq(teamInvites.shopId, shop.id)).orderBy(desc(teamInvites.createdAt)),
+  ]);
+  return { shop, members, invites };
+}
+
+export async function createStaffInvite(ownerUserId: number, input: { email: string; permissionRole: "manager" | "sales" | "inventory" | "support" }) {
+  const db = await getDb();
+  if (!db) return null;
+  const shop = await getShopByOwnerId(ownerUserId);
+  if (!shop) return null;
+  const [created] = await db.insert(teamInvites).values({
+    shopId: shop.id,
+    email: input.email,
+    permissionRole: input.permissionRole,
+    inviteToken: nanoid(24),
+  }).$returningId();
+  const invite = (await db.select().from(teamInvites).where(eq(teamInvites.id, created.id)).limit(1))[0];
+  return { shop, invite };
+}
+
+export async function updateStaffPermission(ownerUserId: number, memberId: number, permissionRole: "manager" | "sales" | "inventory" | "support") {
+  const db = await getDb();
+  if (!db) return null;
+  const shop = await getShopByOwnerId(ownerUserId);
+  if (!shop) return null;
+  await db.update(teamMembers).set({ permissionRole }).where(and(eq(teamMembers.id, memberId), eq(teamMembers.shopId, shop.id), eq(teamMembers.role, "employee")));
+  return { success: true };
+}
+
+export async function revokeStaffInvite(ownerUserId: number, inviteId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const shop = await getShopByOwnerId(ownerUserId);
+  if (!shop) return null;
+  await db.update(teamInvites).set({ status: "revoked" }).where(and(eq(teamInvites.id, inviteId), eq(teamInvites.shopId, shop.id)));
+  return { success: true };
+}
+
+export async function acceptStaffInvite(userId: number, userEmail: string | null, userName: string, inviteToken: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const invite = (await db.select().from(teamInvites).where(and(eq(teamInvites.inviteToken, inviteToken), eq(teamInvites.status, "pending"))).limit(1))[0];
+  if (!invite) throw new Error("This invitation is invalid, expired, or already used.");
+  if (!userEmail || userEmail.toLowerCase() !== invite.email.toLowerCase()) throw new Error("Sign in with the invited email address to accept this invitation.");
+  const existing = (await db.select().from(teamMembers).where(and(eq(teamMembers.shopId, invite.shopId), eq(teamMembers.userId, userId))).limit(1))[0];
+  if (!existing) {
+    await db.insert(teamMembers).values({ shopId: invite.shopId, userId, name: userName, email: userEmail, role: "employee", permissionRole: invite.permissionRole });
+  }
+  await db.update(teamInvites).set({ status: "accepted", acceptedAt: new Date() }).where(eq(teamInvites.id, invite.id));
+  return { success: true, shopId: invite.shopId, permissionRole: invite.permissionRole };
+}
+
+export async function getPublicShopDirectory() {
+  const db = await getDb();
+  if (!db) return [];
+  const listedShops = await db.select().from(shops).where(and(eq(shops.beaconEnabled, true), isNotNull(shops.latitude), isNotNull(shops.longitude))).orderBy(desc(shops.updatedAt));
+  return Promise.all(listedShops.map(async shop => ({
+    id: shop.id,
+    name: shop.name,
+    businessType: shop.businessType,
+    address: shop.address,
+    latitude: Number(shop.latitude),
+    longitude: Number(shop.longitude),
+    currencyCode: shop.currencyCode,
+    inventory: await db.select({ id: products.id, name: products.name, category: products.category, unit: products.unit, stockOnHand: products.stockOnHand, salePriceCents: products.salePriceCents }).from(products).where(and(eq(products.shopId, shop.id), gt(products.stockOnHand, 0))).orderBy(desc(products.updatedAt)),
+  })));
+}
+
+export async function submitCustomerReview(input: { shopId: number; customerName: string; productRating: number; serviceRating: number; comment?: string }) {
+  const db = await getDb();
+  if (!db) return null;
+  const listedShop = (await db.select().from(shops).where(and(eq(shops.id, input.shopId), eq(shops.beaconEnabled, true))).limit(1))[0];
+  if (!listedShop) throw new Error("This shop is not accepting public reviews right now.");
+  await db.insert(reviews).values(input);
   return { success: true };
 }
 

@@ -47,12 +47,24 @@ export const teamMembers = mysqlTable("teamMembers", {
   name: varchar("name", { length: 120 }).notNull(),
   email: varchar("email", { length: 320 }),
   role: mysqlEnum("role", ["owner", "employee"]).default("employee").notNull(),
+  permissionRole: mysqlEnum("permissionRole", ["manager", "sales", "inventory", "support"]).default("sales").notNull(),
   avatarColor: varchar("avatarColor", { length: 20 }).default("#ef8354").notNull(),
   monthlyUnits: int("monthlyUnits").default(0).notNull(),
   yearlyUnits: int("yearlyUnits").default(0).notNull(),
   targetUnits: int("targetUnits").default(1000).notNull(),
   active: boolean("active").default(true).notNull(),
   joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+});
+
+export const teamInvites = mysqlTable("teamInvites", {
+  id: int("id").autoincrement().primaryKey(),
+  shopId: int("shopId").notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  permissionRole: mysqlEnum("permissionRole", ["manager", "sales", "inventory", "support"]).default("sales").notNull(),
+  inviteToken: varchar("inviteToken", { length: 96 }).notNull().unique(),
+  status: mysqlEnum("status", ["pending", "accepted", "revoked"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  acceptedAt: timestamp("acceptedAt"),
 });
 
 export const products = mysqlTable("products", {
@@ -106,6 +118,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Shop = typeof shops.$inferSelect;
 export type TeamMember = typeof teamMembers.$inferSelect;
+export type TeamInvite = typeof teamInvites.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type Sale = typeof sales.$inferSelect;
 export type Review = typeof reviews.$inferSelect;

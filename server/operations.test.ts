@@ -61,6 +61,32 @@ describe("operations router", () => {
     await expect(caller.operations.workspace()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
+  it("keeps staff management owner-only", async () => {
+    const user: AuthenticatedUser = {
+      id: 2,
+      openId: "employee-test",
+      email: "employee@example.com",
+      name: "Employee Test",
+      loginMethod: "test",
+      role: "user",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    };
+    const caller = appRouter.createCaller(createContext(user));
+    await expect(caller.operations.staff()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("validates public customer reviews before writing them", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.operations.submitReview({
+      shopId: 0,
+      customerName: "A",
+      productRating: 6,
+      serviceRating: 5,
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("parses live market prices and preserves the source label", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
