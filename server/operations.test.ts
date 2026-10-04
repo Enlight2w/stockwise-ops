@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import { buildLowStockAlert } from "./db";
 import { getMarketAnalysis } from "./market";
+import { selectLowStockProducts } from "./insights";
 import type { TrpcContext } from "./_core/context";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
@@ -23,6 +24,20 @@ describe("operations router", () => {
   it("allows unauthenticated customers to read the public shop directory", async () => {
     const result = await appRouter.createCaller(createContext()).operations.publicDirectory();
     expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("selects the most urgent low-stock products first", () => {
+    const result = selectLowStockProducts([
+      { name: "Healthy", stockOnHand: 30, reorderLevel: 10, unit: "cases", category: "Pantry" },
+      { name: "Urgent", stockOnHand: 2, reorderLevel: 10, unit: "cases", category: "Pantry" },
+      { name: "Watch", stockOnHand: 8, reorderLevel: 10, unit: "cases", category: "Beverages" },
+    ]);
+    expect(result.map((item) => item.name)).toEqual(["Urgent", "Watch"]);
+  });
+
+  it("keeps AI market insights owner-only", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.operations.aiMarketInsights()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("requires an authenticated user to log a sale", async () => {

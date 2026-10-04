@@ -6,6 +6,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { acceptStaffInvite, createSale, createStaffInvite, getInventoryAlerts, getOwnerWorkspace, getPublicShopDirectory, getShopByOwnerId, getShopSnapshot, getStaffForOwner, getTeamMemberForUser, markInventoryAlertRead, markReview, revokeStaffInvite, setShopBeacon, submitCustomerReview, updateShopProfile, updateStaffPermission } from "./db";
 import { getMarketAnalysis, getMarketAnalysisBatch } from "./market";
+import { getOwnerAiMarketInsights } from "./insights";
 import { TRPCError } from "@trpc/server";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -71,6 +72,7 @@ export const appRouter = router({
         currencyCode: z.string().trim().min(3).max(8),
       }))
       .query(({ input }) => getMarketAnalysisBatch(input)),
+    aiMarketInsights: ownerProcedure.query(({ ctx }) => getOwnerAiMarketInsights(ctx.user.id)),
     staff: ownerProcedure.query(({ ctx }) => getStaffForOwner(ctx.user.id)),
     inviteStaff: ownerProcedure
       .input(z.object({ email: z.string().trim().email(), permissionRole: z.enum(["manager", "sales", "inventory", "support"]) }))
