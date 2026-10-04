@@ -28,9 +28,9 @@ describe("operations router", () => {
 
   it("selects the most urgent low-stock products first", () => {
     const result = selectLowStockProducts([
-      { name: "Healthy", stockOnHand: 30, reorderLevel: 10, unit: "cases", category: "Pantry" },
-      { name: "Urgent", stockOnHand: 2, reorderLevel: 10, unit: "cases", category: "Pantry" },
-      { name: "Watch", stockOnHand: 8, reorderLevel: 10, unit: "cases", category: "Beverages" },
+      { id: 1, name: "Healthy", stockOnHand: 30, reorderLevel: 10, unit: "cases", category: "Pantry" },
+      { id: 2, name: "Urgent", stockOnHand: 2, reorderLevel: 10, unit: "cases", category: "Pantry" },
+      { id: 3, name: "Watch", stockOnHand: 8, reorderLevel: 10, unit: "cases", category: "Beverages" },
     ]);
     expect(result.map((item) => item.name)).toEqual(["Urgent", "Watch"]);
   });
@@ -38,6 +38,11 @@ describe("operations router", () => {
   it("keeps AI market insights owner-only", async () => {
     const caller = appRouter.createCaller(createContext());
     await expect(caller.operations.aiMarketInsights()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("keeps one-click market price updates owner-only", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.operations.applyMarketPrice({ productId: 1, salePriceCents: 1850 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("requires an authenticated user to log a sale", async () => {

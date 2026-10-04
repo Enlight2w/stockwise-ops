@@ -3,11 +3,13 @@ import { getMarketAnalysisBatch } from "./market";
 import { invokeLLM } from "./_core/llm";
 
 export type LowStockMarketInsight = {
+  productId: number;
   productName: string;
   stockOnHand: number;
   reorderLevel: number;
   unit: string;
   marketSample: number;
+  currentPrice: number;
   currencyCode: string;
   marketSource: "live_web_snapshot" | "benchmark_fallback";
   trend: "rising" | "stable" | "softening";
@@ -24,7 +26,7 @@ export type AiMarketInsights = {
   items: LowStockMarketInsight[];
 };
 
-export function selectLowStockProducts(inventory: Array<{ name: string; stockOnHand: number; reorderLevel: number; unit: string; category: string }>) {
+export function selectLowStockProducts(inventory: Array<{ id: number; name: string; stockOnHand: number; reorderLevel: number; unit: string; category: string }>) {
   return inventory
     .filter((product) => product.stockOnHand <= product.reorderLevel)
     .sort((a, b) => (a.stockOnHand / Math.max(1, a.reorderLevel)) - (b.stockOnHand / Math.max(1, b.reorderLevel)))
@@ -62,11 +64,13 @@ export async function getOwnerAiMarketInsights(ownerUserId: number): Promise<AiM
     const trend = market?.sourceType === "live_web_snapshot" && marketRatio <= 1.05 ? "rising" : marketRatio >= 1.2 ? "softening" : "stable";
     const stockRatio = product.stockOnHand / Math.max(1, product.reorderLevel);
     return {
+      productId: product.id,
       productName: product.name,
       stockOnHand: product.stockOnHand,
       reorderLevel: product.reorderLevel,
       unit: product.unit,
       marketSample: market?.sample ?? 0,
+      currentPrice,
       currencyCode: workspace.shop.currencyCode,
       marketSource: market?.sourceType ?? "benchmark_fallback",
       trend,

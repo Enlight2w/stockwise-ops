@@ -122,6 +122,17 @@ export async function getShopByOwnerId(ownerUserId: number) {
   return (await db.select().from(shops).where(eq(shops.ownerUserId, ownerUserId)).limit(1))[0];
 }
 
+export async function updateOwnerProductPrice(ownerUserId: number, productId: number, salePriceCents: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const shop = await getShopByOwnerId(ownerUserId);
+  if (!shop) return null;
+  const product = (await db.select().from(products).where(and(eq(products.id, productId), eq(products.shopId, shop.id))).limit(1))[0];
+  if (!product) throw new Error("Product not found in the owner workspace.");
+  await db.update(products).set({ salePriceCents }).where(and(eq(products.id, productId), eq(products.shopId, shop.id)));
+  return { success: true, productId, salePriceCents };
+}
+
 export async function getTeamMemberForUser(userId: number) {
   const db = await getDb();
   if (!db) return undefined;

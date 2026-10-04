@@ -4,7 +4,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { acceptStaffInvite, createSale, createStaffInvite, getInventoryAlerts, getOwnerWorkspace, getPublicShopDirectory, getShopByOwnerId, getShopSnapshot, getStaffForOwner, getTeamMemberForUser, markInventoryAlertRead, markReview, revokeStaffInvite, setShopBeacon, submitCustomerReview, updateShopProfile, updateStaffPermission } from "./db";
+import { acceptStaffInvite, createSale, createStaffInvite, getInventoryAlerts, getOwnerWorkspace, getPublicShopDirectory, getShopByOwnerId, getShopSnapshot, getStaffForOwner, getTeamMemberForUser, markInventoryAlertRead, markReview, revokeStaffInvite, setShopBeacon, submitCustomerReview, updateOwnerProductPrice, updateShopProfile, updateStaffPermission } from "./db";
 import { getMarketAnalysis, getMarketAnalysisBatch } from "./market";
 import { getOwnerAiMarketInsights } from "./insights";
 import { TRPCError } from "@trpc/server";
@@ -73,6 +73,9 @@ export const appRouter = router({
       }))
       .query(({ input }) => getMarketAnalysisBatch(input)),
     aiMarketInsights: ownerProcedure.query(({ ctx }) => getOwnerAiMarketInsights(ctx.user.id)),
+    applyMarketPrice: ownerProcedure
+      .input(z.object({ productId: z.number().int().positive(), salePriceCents: z.number().int().nonnegative().max(100000000) }))
+      .mutation(({ ctx, input }) => updateOwnerProductPrice(ctx.user.id, input.productId, input.salePriceCents)),
     staff: ownerProcedure.query(({ ctx }) => getStaffForOwner(ctx.user.id)),
     inviteStaff: ownerProcedure
       .input(z.object({ email: z.string().trim().email(), permissionRole: z.enum(["manager", "sales", "inventory", "support"]) }))
