@@ -133,10 +133,10 @@ export async function updateOwnerProductPrice(ownerUserId: number, productId: nu
   return { success: true, productId, salePriceCents };
 }
 
-export async function getTeamMemberForUser(userId: number) {
+export async function getTeamMemberForUser(userId: number, shopId: number) {
   const db = await getDb();
   if (!db) return undefined;
-  return (await db.select().from(teamMembers).where(and(eq(teamMembers.userId, userId), eq(teamMembers.active, true))).limit(1))[0];
+  return (await db.select().from(teamMembers).where(and(eq(teamMembers.userId, userId), eq(teamMembers.shopId, shopId), eq(teamMembers.active, true))).limit(1))[0];
 }
 
 export async function getStaffForOwner(ownerUserId: number) {
@@ -223,18 +223,18 @@ export async function submitCustomerReview(input: { shopId: number; customerName
   return { success: true };
 }
 
-export async function getShopSnapshot() {
+export async function getShopSnapshot(ownerUserId: number) {
   const db = await getDb();
   if (!db) return null;
-  const shop = await db.select().from(shops).orderBy(desc(shops.createdAt)).limit(1);
-  if (!shop[0]) return null;
+  const shop = (await db.select().from(shops).where(eq(shops.ownerUserId, ownerUserId)).limit(1))[0];
+  if (!shop) return null;
   const [inventory, team, recentReviews, recentSales] = await Promise.all([
-    db.select().from(products).where(eq(products.shopId, shop[0].id)).orderBy(desc(products.updatedAt)),
-    db.select().from(teamMembers).where(and(eq(teamMembers.shopId, shop[0].id), eq(teamMembers.active, true))).orderBy(desc(teamMembers.monthlyUnits)),
-    db.select().from(reviews).where(eq(reviews.shopId, shop[0].id)).orderBy(desc(reviews.createdAt)).limit(12),
-    db.select().from(sales).where(eq(sales.shopId, shop[0].id)).orderBy(desc(sales.soldAt)).limit(40),
+    db.select().from(products).where(eq(products.shopId, shop.id)).orderBy(desc(products.updatedAt)),
+    db.select().from(teamMembers).where(and(eq(teamMembers.shopId, shop.id), eq(teamMembers.active, true))).orderBy(desc(teamMembers.monthlyUnits)),
+    db.select().from(reviews).where(eq(reviews.shopId, shop.id)).orderBy(desc(reviews.createdAt)).limit(12),
+    db.select().from(sales).where(eq(sales.shopId, shop.id)).orderBy(desc(sales.soldAt)).limit(40),
   ]);
-  return { shop: shop[0], inventory, team, reviews: recentReviews, sales: recentSales };
+  return { shop, inventory, team, reviews: recentReviews, sales: recentSales };
 }
 
 export async function getInventoryAlerts(shopId: number) {
@@ -246,10 +246,10 @@ export async function getInventoryAlerts(shopId: number) {
     .limit(20);
 }
 
-export async function markInventoryAlertRead(alertId: number) {
+export async function markInventoryAlertRead(alertId: number, shopId: number) {
   const db = await getDb();
   if (!db) return null;
-  await db.update(inventoryAlerts).set({ readAt: new Date() }).where(eq(inventoryAlerts.id, alertId));
+  await db.update(inventoryAlerts).set({ readAt: new Date() }).where(and(eq(inventoryAlerts.id, alertId), eq(inventoryAlerts.shopId, shopId)));
   return { success: true };
 }
 
@@ -273,28 +273,41 @@ export async function createSale(input: {
   productId: number;
   employeeId?: number;
   quantity: number;
-  revenueCents: number;
-  profitCents: number;
 }) {
   const db = await getDb();
   if (!db) return null;
   return db.transaction(async tx => {
-    const productRows = await tx.select().from(products).where(eq(products.id, input.productId)).limit(1);
+    const productRows = await tx.select().from(products)
+      .where(and(eq(products.id, input.productId), eq(products.shopId, input.shopId)))
+      .limit(1)
+      .for("update");
     const product = productRows[0];
-    if (!product) throw new Error("Product not found");
+    if (!product) throw new Error("Product not found in this shop");
+    if (product.stockOnHand < input.quantity) throw new Error("Not enough stock to log this sale");
+
+    if (input.employeeId) {
+      const employee = (await tx.select().from(teamMembers).where(and(
+        eq(teamMembers.id, input.employeeId),
+        eq(teamMembers.shopId, input.shopId),
+        eq(teamMembers.active, true),
+      )).limit(1))[0];
+      if (!employee) throw new Error("Employee not found in this shop");
+    }
 
     const nextStock = product.stockOnHand - input.quantity;
-    await tx.insert(sales).values(input);
+    const revenueCents = product.salePriceCents * input.quantity;
+    const profitCents = (product.salePriceCents - product.costPriceCents) * input.quantity;
+    await tx.insert(sales).values({ ...input, revenueCents, profitCents });
     await tx.update(products)
       .set({ stockOnHand: sql`${products.stockOnHand} - ${input.quantity}` })
-      .where(eq(products.id, input.productId));
+      .where(and(eq(products.id, input.productId), eq(products.shopId, input.shopId)));
     if (input.employeeId) {
       await tx.update(teamMembers)
         .set({
           monthlyUnits: sql`${teamMembers.monthlyUnits} + ${input.quantity}`,
           yearlyUnits: sql`${teamMembers.yearlyUnits} + ${input.quantity}`,
         })
-        .where(eq(teamMembers.id, input.employeeId));
+        .where(and(eq(teamMembers.id, input.employeeId), eq(teamMembers.shopId, input.shopId), eq(teamMembers.active, true)));
     }
 
     const lowStockAlert = buildLowStockAlert({
@@ -327,9 +340,9 @@ export async function setShopBeacon(shopId: number, enabled: boolean, latitude?:
   return { success: true };
 }
 
-export async function markReview(reviewId: number, status: "new" | "reviewed" | "archived") {
+export async function markReview(reviewId: number, shopId: number, status: "new" | "reviewed" | "archived") {
   const db = await getDb();
   if (!db) return null;
-  await db.update(reviews).set({ status }).where(eq(reviews.id, reviewId));
+  await db.update(reviews).set({ status }).where(and(eq(reviews.id, reviewId), eq(reviews.shopId, shopId)));
   return { success: true };
 }

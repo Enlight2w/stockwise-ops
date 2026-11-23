@@ -16,9 +16,9 @@ function createContext(user?: AuthenticatedUser): TrpcContext {
 }
 
 describe("operations router", () => {
-  it("allows a public snapshot read for the dashboard shell", async () => {
-    const result = await appRouter.createCaller(createContext()).operations.snapshot();
-    expect(result === null || typeof result === "object").toBe(true);
+  it("keeps shop snapshots private", async () => {
+    const caller = appRouter.createCaller(createContext());
+    await expect(caller.operations.snapshot()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("allows unauthenticated customers to read the public shop directory", async () => {
@@ -51,8 +51,6 @@ describe("operations router", () => {
       shopId: 1,
       productId: 1,
       quantity: 2,
-      revenueCents: 2000,
-      profitCents: 700,
     })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
@@ -142,8 +140,6 @@ describe("operations router", () => {
       shopId: 1,
       productId: 1,
       quantity: 0,
-      revenueCents: 2000,
-      profitCents: 700,
     })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
