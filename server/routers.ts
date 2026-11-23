@@ -24,6 +24,14 @@ const ownerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   return next();
 });
 
+async function assertOwnerShopAccess(userId: number, role: string, shopId: number) {
+  if (role === "admin") return;
+  const shop = await getShopByOwnerId(userId);
+  if (!shop || shop.id !== shopId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "This shop is outside your owner workspace." });
+  }
+}
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -35,7 +43,7 @@ export const appRouter = router({
     }),
   }),
   operations: router({
-    snapshot: publicProcedure.query(() => getShopSnapshot()),
+    snapshot: ownerProcedure.query(({ ctx }) => getShopSnapshot(ctx.user.id)),
     publicDirectory: publicProcedure.query(() => getPublicShopDirectory()),
     submitReview: publicProcedure
       .input(z.object({
@@ -91,26 +99,31 @@ export const appRouter = router({
       .mutation(({ ctx, input }) => acceptStaffInvite(ctx.user.id, ctx.user.email, ctx.user.name ?? "Team member", input.inviteToken)),
     alerts: ownerProcedure
       .input(z.object({ shopId: z.number().int().positive() }))
-      .query(({ input }) => getInventoryAlerts(input.shopId)),
+      .query(async ({ ctx, input }) => {
+        await assertOwnerShopAccess(ctx.user.id, ctx.user.role, input.shopId);
+        return getInventoryAlerts(input.shopId);
+      }),
     markAlertRead: ownerProcedure
-      .input(z.object({ alertId: z.number().int().positive() }))
-      .mutation(({ input }) => markInventoryAlertRead(input.alertId)),
+      .input(z.object({ shopId: z.number().int().positive(), alertId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await assertOwnerShopAccess(ctx.user.id, ctx.user.role, input.shopId);
+        return markInventoryAlertRead(input.alertId, input.shopId);
+      }),
     logSale: protectedProcedure
       .input(z.object({
         shopId: z.number().int().positive(),
         productId: z.number().int().positive(),
-        employeeId: z.number().int().positive().optional(),
         quantity: z.number().int().positive().max(10000),
-        revenueCents: z.number().int().nonnegative(),
-        profitCents: z.number().int(),
       }))
       .mutation(async ({ ctx, input }) => {
+        let employeeId: number | undefined;
         if (ctx.user.role !== "admin") {
-          const member = await getTeamMemberForUser(ctx.user.id);
+          const member = await getTeamMemberForUser(ctx.user.id, input.shopId);
           const canLogSale = member?.role === "owner" || member?.permissionRole === "manager" || member?.permissionRole === "sales";
           if (!canLogSale) throw new TRPCError({ code: "FORBIDDEN", message: "Your staff role cannot log sales." });
+          employeeId = member.id;
         }
-        const result = await createSale(input);
+        const result = await createSale({ ...input, employeeId });
         if (result?.lowStockAlert) {
           let ownerNotificationSent = false;
           try {
@@ -132,10 +145,16 @@ export const appRouter = router({
         latitude: z.string().optional(),
         longitude: z.string().optional(),
       }))
-      .mutation(({ input }) => setShopBeacon(input.shopId, input.enabled, input.latitude, input.longitude)),
+      .mutation(async ({ ctx, input }) => {
+        await assertOwnerShopAccess(ctx.user.id, ctx.user.role, input.shopId);
+        return setShopBeacon(input.shopId, input.enabled, input.latitude, input.longitude);
+      }),
     markReview: ownerProcedure
-      .input(z.object({ reviewId: z.number().int().positive(), status: z.enum(["new", "reviewed", "archived"]) }))
-      .mutation(({ input }) => markReview(input.reviewId, input.status)),
+      .input(z.object({ shopId: z.number().int().positive(), reviewId: z.number().int().positive(), status: z.enum(["new", "reviewed", "archived"]) }))
+      .mutation(async ({ ctx, input }) => {
+        await assertOwnerShopAccess(ctx.user.id, ctx.user.role, input.shopId);
+        return markReview(input.reviewId, input.shopId, input.status);
+      }),
   }),
 });
 
